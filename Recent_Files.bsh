@@ -1,0 +1,141 @@
+/* Recent_File.bsh - a BeanShell macro script to easily re-open a
+ * recent file.
+ *
+ * This Script is a modification of Recent_Files.bsh, written by
+ * Jeroen Budts and Ollie Rutherfurd.
+ * Copyright (C) 2001-2004 Ollie Rutherfurd, oliver@rutherfurd.net
+ * 
+ * Modified by AhLeung Cheng
+ *
+ * {{{ License
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 2
+ * of the License, or any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with the jEdit program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ * }}}
+ */
+
+import java.util.regex.Pattern;
+
+class Entry {
+	Entry(String n, String d, Icon i) { name=n; directory=d; icon=i; }
+	String name, directory;
+	Icon icon;
+}
+
+BufferCellRenderer() {
+	_border = new javax.swing.border.EmptyBorder(2,2,2,2);
+	_font = null;
+	Component getListCellRendererComponent(JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+		Entry v = (Entry)value;
+		l = new JLabel("<html>"+v.name+" <small><font color='gray'>"+v.directory+"</font></small></html>");
+		if (_font==null) _font = l.getFont().deriveFont(l.getFont().getSize()+3.0f);
+		l.setOpaque(true);
+		l.setIcon(v.icon);
+		l.setBorder(_border);
+		l.setFont(_font);
+		if (isSelected) {
+			l.setBackground(list.getSelectionBackground());
+			l.setForeground(list.getSelectionForeground());
+		}
+		else {
+			l.setBackground(list.getBackground());
+			l.setForeground(list.getForeground());
+		}
+		return l;
+	}
+	return this;
+}
+
+RecentFilesDialog(doModal, dialogDimension) {
+	fileList = new JList();
+	JTextField tf = new JTextField();
+	tf.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "esc");
+	tf.getActionMap().put("tab", new AbstractAction() { public void actionPerformed(ActionEvent e) {
+		int len = fileList.getModel().getSize();
+		select = (fileList.getSelectedIndex()+len+ (e.getModifiers()==0? 1:-1))%len;
+		fileList.setSelectedIndex(select);
+		fileList.ensureIndexIsVisible(select);
+	}});
+	tf.getActionMap().put("esc", new AbstractAction() { public void actionPerformed(ActionEvent e) { dialog.dispose(); }});
+	tf.addActionListener(this);
+	void actionPerformed(ActionEvent e) { switchBuffer(); dialog.dispose(); };
+
+	Entry[] allRecentFiles = null;
+	String keyword = null;
+	void run() {
+		if (allRecentFiles==null) {	// initialize the list here to speed up startup time
+			fileList.setCellRenderer(BufferCellRenderer());
+			fileList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+			fileList.addMouseListener(this);
+			List historyList = BufferHistory.getHistory();
+			allRecentFiles = new Entry[historyList.size()];
+			final Icon emptyIcon = new Icon(){
+				int getIconHeight() { return 10; }
+				int getIconWidth() { return 10; }
+				void paintIcon(Component c, Graphics g, int x, int y) { }
+			};
+			Hashtable icons = new Hashtable();
+			for (Buffer b:jEdit.getBuffers()) icons.put(b.getPath(), b.getIcon());
+			int i=0;
+			for (BufferHistory.Entry h:historyList) {
+				int sep = h.path.lastIndexOf(File.separator);
+				allRecentFiles[i] = new Entry(h.path.substring(sep+1), h.path.substring(0,sep+1), icons.containsKey(h.path)? icons.get(h.path):emptyIcon);	// need emptyIcon, cannot be null...
+				i++;
+			}
+
+			tf.setFocusTraversalKeysEnabled(false);	// To capture TAB & S+TAB
+			tf.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "tab");
+			tf.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, InputEvent.SHIFT_DOWN_MASK), "tab");
+		}
+		if (keyword==tf.getText()) return;
+		keyword = tf.getText();
+		if (keyword=="") fileList.setListData(allRecentFiles);
+		else {
+			Vector v = new Vector();
+			for (Entry f:allRecentFiles) if (Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE).matcher(f.name).find()) v.add(f);
+			fileList.setListData(v);	// ref: JList setListData threading issues http://stackoverflow.com/questions/4547113
+			if (v.size()>0) fileList.setSelectedIndex(0);
+		}
+	};
+	void changedUpdate(e) {}
+	void removeUpdate(e) { SwingUtilities.invokeLater(this); }
+	void insertUpdate(e) { SwingUtilities.invokeLater(this); }
+	tf.getDocument().addDocumentListener(this);
+
+	void mouseEntered(e){}
+	void mouseExited(e){}
+	void mousePressed(e){}
+	void mouseReleased(e){}
+	void mouseClicked(evt) {
+		if (SwingUtilities.isLeftMouseButton(evt)) { switchBuffer(); dialog.dispose(); }
+		else if (SwingUtilities.isRightMouseButton(evt)) { fileList.setSelectedIndex( fileList.locationToIndex(evt.getPoint()) ); switchBuffer(); }
+	}
+
+	content = new JPanel(new BorderLayout());
+	content.add(tf, BorderLayout.NORTH);
+	content.add(new JScrollPane(fileList, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED), BorderLayout.CENTER);
+	dialog = new JDialog(view, doModal);
+	dialog.setContentPane(content);
+	dialog.setMinimumSize(dialogDimension);
+	dialog.setMaximumSize(dialogDimension);
+	dialog.setLocationRelativeTo(view);
+	dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+	dialog.setVisible(true);
+
+	void switchBuffer() { Entry f = fileList.getSelectedValue(); jEdit.openFile(view, f.directory+f.name); }
+	SwingUtilities.invokeLater(this);
+}
+
+RecentFilesDialog(false, new Dimension(600, 400));
+
+

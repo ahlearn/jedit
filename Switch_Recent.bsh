@@ -1,11 +1,14 @@
 /* Switch_Recent.bsh - a BeanShell macro script for displaying
  * and switching between open buffers (in most recently viewed order).
  * This is similar to the functionality provided by Alt+Tab in Windows.
- *
  * It is assumed that this macro is mapped to the Ctrl-Tab shortcut.
  *
- * Modified from Buffer_Switcher.bsh written by Ollie Rutherfurd: http://web.mit.edu/~jedit/arch/java/versions/4.3pre5/macros/Files/Buffer_Switcher.bsh
- *   Copyright (C) 2001-2004 Ollie Rutherfurd, oliver@rutherfurd.net
+ * This Script is a modification of Buffer_Switcher.bsh, written by
+ * Ollie Rutherfurd.
+ * http://web.mit.edu/~jedit/arch/java/versions/4.3pre5/macros/Files/Buffer_Switcher.bsh
+ * Copyright (C) 2001-2004 Ollie Rutherfurd, oliver@rutherfurd.net
+ * 
+ * Modified by AhLeung Cheng
  *
  * {{{ License
  * This program is free software; you can redistribute it and/or
@@ -22,19 +25,19 @@
  * along with the jEdit program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  * }}}
- *
- * @author AhLeung Cheng
  */
 
 BufferCellRenderer() {
+	_border = new javax.swing.border.EmptyBorder(3,3,3,3);
+	_font = null;
 	Component getListCellRendererComponent(JList list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
-		l = new JLabel();
+		Buffer b = (Buffer)value;
+		l = new JLabel("<html>"+b.getName()+" <small><font color='gray'>"+b.getDirectory()+"</font></small></html>");
+		if (_font==null) _font = l.getFont().deriveFont(l.getFont().getSize()+7.0f);
 		l.setOpaque(true);
-		l.setText(value.toString());
 		l.setIcon(value.getIcon());
-		l.setBorder(new javax.swing.border.EmptyBorder(3,3,3,3));
-		Font f = l.getFont();
-		l.setFont(f.deriveFont(f.getSize()+5.0f));	// bufferList.setFont doesn't work
+		l.setBorder(_border);
+		l.setFont(_font);
 		if (isSelected) {
 			l.setBackground(list.getSelectionBackground());
 			l.setForeground(list.getSelectionForeground());
@@ -51,25 +54,27 @@ BufferCellRenderer() {
 SwitchRecentDialog(doModal, dialogDimension) {
 	Buffer[] openBuffers = jEdit.getBuffers();
 	int listLength = openBuffers.length;
-	dialog = new JDialog(view, "" + listLength + " open buffers", doModal);
 
-	BufferHistory.Entry[] historyEntries = BufferHistory.getHistory().toArray(new BufferHistory.Entry[0]);
-	Map map = new TreeMap();	// sort the list by tree map
+	List history = BufferHistory.getHistory();
+	Map map = new TreeMap();	// used to sort the list by tree map.  key = position; value = buffer;
 	for (int i=0; i<listLength; i++) {
-		int position = historyEntries.length;	// default position = at the end
-		for (int j=0; j<historyEntries.length; j++) {
-			if (openBuffers[i].getPath().equals(historyEntries[j].path)) { position = j; break; }
+		int position = history.size()+i;	// default position = at the end, "+i" is needed to avoid duplicate key
+		int j=0;
+		for (BufferHistory.Entry e:history) {
+			if (openBuffers[i].getPath().equals(e.path)) { position = j; break; }
+			else j++;
 		}
 		map.put(position, openBuffers[i]);
 	}
-	bufferList = new JList(map.values().toArray());		// set the sorted list as bufferList data
-	bufferList.setCellRenderer(BufferCellRenderer());
-	bufferList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-	bufferList.setFocusTraversalKeys(KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, java.util.Collections.EMPTY_SET);	// To capture the TAB key
-	bufferList.setSelectedIndex(listLength>1? 1:0);	// select the next recent buffer
+	bufferList = new JList(map.values().toArray());	// set the sorted list as bufferList data
 	bufferList.addKeyListener(this);
 	bufferList.addMouseListener(this);
+	bufferList.setSelectedIndex(listLength>1? 1:0);	// select the next recent buffer
+	bufferList.setCellRenderer(BufferCellRenderer());
+	bufferList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+	bufferList.setFocusTraversalKeys(KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, java.util.Collections.EMPTY_SET);	// to capture the TAB key
 
+	dialog = new JDialog(view, "" + listLength + " open buffers", doModal);
 	dialog.setContentPane(new JScrollPane(bufferList, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED));
 	dialog.setMinimumSize(dialogDimension);
 	dialog.setMaximumSize(dialogDimension);
@@ -77,27 +82,24 @@ SwitchRecentDialog(doModal, dialogDimension) {
 	dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
 	dialog.setVisible(true);
 
-	void switchBuffer() {
-		view.getEditPane().setBuffer(bufferList.getSelectedValue());
-	}
+	void switchBuffer() { view.getEditPane().setBuffer(bufferList.getSelectedValue()); }
 
 	void keyPressed(evt) {
 		evt.consume();
+		int selected = bufferList.getSelectedIndex();
 		switch (evt.getKeyCode()) {
 		case KeyEvent.VK_BACK_QUOTE:
-			selected = (bufferList.getSelectedIndex()+listLength-1)%listLength;
-			bufferList.setSelectedIndex(selected);
-			bufferList.ensureIndexIsVisible(selected);
+			selected = (selected+listLength-1)%listLength;
 			break;
 		case KeyEvent.VK_TAB:
-			selected = (bufferList.getSelectedIndex()+1)%listLength;
-			bufferList.setSelectedIndex(selected);
-			bufferList.ensureIndexIsVisible(selected);
+			selected = (selected+1)%listLength;
 			break;
 		case KeyEvent.VK_ESCAPE:
 			dialog.dispose();
-			break;
+			return;
 		}
+		bufferList.setSelectedIndex(selected);
+		bufferList.ensureIndexIsVisible(selected);
 	}
 	void keyReleased(evt) {
 		if (evt.getKeyCode() == KeyEvent.VK_CONTROL) {
@@ -111,10 +113,6 @@ SwitchRecentDialog(doModal, dialogDimension) {
 		if (SwingUtilities.isLeftMouseButton(evt)) {
 			switchBuffer();
 			dialog.dispose();
-		}
-		else if (SwingUtilities.isRightMouseButton(evt)) {
-			bufferList.setSelectedIndex( bufferList.locationToIndex(evt.getPoint()) );
-			switchBuffer();
 		}
 	}
 	void mouseEntered(evt){}
